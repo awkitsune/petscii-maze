@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>PETSCII MAZE</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #352879;
+            }
+            canvas {
+                display: block;
+                width: 100vw;
+                height: 100vh;
+                image-rendering: pixelated;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="c"></canvas>
+        <script>
+            const BG = "#352879",
+                FG = "#6C5EB5",
+                GLYPH = 8,
+                SIZE = 3,
+                CPS = 120; // SIZE = css px per bitmap pixel, CPS = chars/sec
+            // 8x8 forward-slash bitmap; backslash is its horizontal mirror
+            const SLASH = [
+                0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1,
+                1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1,
+                1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0,
+                0,
+            ];
+            const BACK = [];
+            for (let r = 0; r < GLYPH; r++)
+                for (let k = 0; k < GLYPH; k++)
+                    BACK.push(SLASH[r * GLYPH + (GLYPH - 1 - k)]);
+
+            const EMPTY = 255; // grid sentinel: cell not yet printed
+            const cv = document.getElementById("c"),
+                c = cv.getContext("2d");
+            let w, h, px, cell, cols, rows, ox, oy, cx, grid, glyphs;
+
+            // pre-render each glyph once into its own cell-sized canvas at the current pixel size
+            function buildGlyphs() {
+                glyphs = [SLASH, BACK].map((bmp) => {
+                    const g = document.createElement("canvas");
+                    g.width = g.height = cell;
+                    const gc = g.getContext("2d");
+                    gc.fillStyle = FG;
+                    for (let r = 0; r < GLYPH; r++)
+                        for (let k = 0; k < GLYPH; k++)
+                            if (bmp[r * GLYPH + k])
+                                gc.fillRect(k * px, r * px, px, px);
+                    return g;
+                });
+            }
+
+            const stamp = (col, row, g) =>
+                c.drawImage(glyphs[g], ox + col * cell, oy + row * cell); // always fresh from the crisp source
+
+            function repaint() {
+                // redraw the whole screen from the logical grid
+                c.fillStyle = BG;
+                c.fillRect(0, 0, w, h);
+                for (let r = 0; r < rows; r++)
+                    for (let col = 0; col < cols; col++)
+                        if (grid[r][col] !== EMPTY) stamp(col, r, grid[r][col]);
+            }
+
+            const randRow = () =>
+                Uint8Array.from({ length: cols }, () =>
+                    Math.random() < 0.5 ? 0 : 1,
+                );
+            const emptyRow = () => new Uint8Array(cols).fill(EMPTY);
+
+            function reset() {
+                const dpr = devicePixelRatio || 1;
+                px = Math.max(1, Math.round(SIZE * dpr)); // integer -> perfectly crisp pixels
+                cell = px * GLYPH;
+                w = cv.width = Math.ceil(innerWidth * dpr);
+                h = cv.height = Math.ceil(innerHeight * dpr);
+                c.imageSmoothingEnabled = false; // setting canvas size resets context state; keep it off
+                cols = Math.floor(w / cell); // only whole cells -> no clipped glyphs at the edges
+                rows = Math.floor(h / cell);
+                ox = (w - cols * cell) >> 1; // center the grid; the leftover splits into symmetric BG margins
+                oy = (h - rows * cell) >> 1;
+                buildGlyphs();
+                const still = matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                ).matches;
+                grid = []; // fill every row, except leave the bottom for the print-head
+                for (let r = 0; r < rows; r++)
+                    grid.push(still || r < rows - 1 ? randRow() : emptyRow());
+                repaint();
+                cx = 0;
+                return still;
+            }
+
+            function step() {
+                // print one glyph on the bottom row, advance the head
+                const g = Math.random() < 0.5 ? 0 : 1;
+                grid[rows - 1][cx] = g;
+                stamp(cx, rows - 1, g);
+                if (++cx >= cols) {
+                    // bottom row full -> scroll up one row
+                    grid.shift();
+                    grid.push(emptyRow());
+                    repaint();
+                    cx = 0;
+                }
+            }
+
+            let last = 0,
+                carry = 0;
+            function frame(t) {
+                carry += ((last ? t - last : 0) / 1000) * CPS;
+                last = t;
+                const owed = carry | 0;
+                carry -= owed;
+                let n = Math.min(owed, cols * 3); // cap the burst after a backgrounded tab
+                while (n-- > 0) step();
+                requestAnimationFrame(frame);
+            }
+
+            addEventListener("resize", () =>
+                requestAnimationFrame(() => {
+                    last = 0;
+                    reset();
+                }),
+            );
+            if (!reset()) requestAnimationFrame(frame);
+        </script>
+    </body>
+</html>
